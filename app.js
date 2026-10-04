@@ -130,7 +130,8 @@ function hash(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.
 function simular(p, key) {
   const prog = Math.min(1, 0.04 + (Date.now() - T0) / 240000);
   const te = p.tot.te || 50000, c = Math.round(te * 0.8 * prog), vv = Math.round(c * 0.92);
-  const w = p.cands.map(x => Math.pow(hash(x.sq) * 0.85 + hash(x.sq + key) * 0.3, 4));
+  // o último fator faz cada candidato subir ou cair ao longo da apuração, para testar o gráfico de evolução
+  const w = p.cands.map(x => Math.pow(hash(x.sq) * 0.85 + hash(x.sq + key) * 0.3, 4) * (1 + (hash(x.sq + 'tend') - 0.5) * 1.4 * prog));
   const sw = w.reduce((a, b) => a + b, 0) || 1;
   p.cands.forEach((x, i) => { x.vap = Math.round(vv * w[i] / sw); x.pvap = vv ? x.vap / vv * 100 : 0; });
   Object.assign(p.tot, {
@@ -166,6 +167,54 @@ function load(url, maxAge = REFRESH_MS - 1500) {
   })();
   inflight.set(url, pr);
   return pr;
+}
+
+/* ---------- Histórico da apuração (gravado neste navegador a cada parcial do TSE) ----------
+   Ponto: [hora TSE, seções totalizadas, % apurado × 100, % de cada candidato × 100 na ordem de `sq`] */
+const HIST_KEY = `apu26-evo-v1-t${TURNO}`;
+const HIST_MAX = 300;
+let hist = {}, histDirty = false;
+if (!SIM) try { const h = JSON.parse(localStorage.getItem(HIST_KEY)); if (h && typeof h === 'object') hist = h; } catch { }
+
+function record(key, p) {
+  const t = p?.tot;
+  if (!t?.st || !p.cands.length) return;
+  const h = hist[key] || (hist[key] = { sq: [], pts: [] });
+  const pts = h.pts;
+  while (pts.length && pts[pts.length - 1][1] > t.st) pts.pop(); // correção do TSE: descarta o que ficou à frente
+  const by = new Map(p.cands.map(c => [c.sq, c]));
+  for (const sq of by.keys()) if (!h.sq.includes(sq)) h.sq.push(sq);
+  const pst = Math.round(t.pst * 100);
+  const pt = [String(p.hg || '').slice(0, 5), t.st, pst, ...h.sq.map(sq => by.has(sq) ? Math.round(by.get(sq).pvap * 100) : null)];
+  const last = pts[pts.length - 1];
+  if (last && (last[1] === t.st || last[2] === pst)) {
+    if (last.join() === pt.join()) return;
+    pts[pts.length - 1] = pt;
+  } else pts.push(pt);
+  if (pts.length > HIST_MAX) for (let i = pts.length - 40; i > 0; i -= 2) pts.splice(i, 1);
+  histDirty = true;
+}
+function saveHist() {
+  if (!histDirty || SIM) return;
+  histDirty = false;
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch {
+    // sem espaço: fica só com o cargo atual
+    for (const k in hist) if (!k.includes(`-c${CARGOS[st.cargo].cd}-`)) delete hist[k];
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch { }
+  }
+}
+function trendOf(h, sq) {
+  const i = h ? h.sq.indexOf(sq) : -1;
+  if (i < 0 || h.pts.length < 2) return null;
+  const col = i + 3, a = h.pts.find(q => q[col] != null), b = h.pts[h.pts.length - 1];
+  if (!a || a === b || b[col] == null) return null;
+  return { d: (b[col] - a[col]) / 100, from: a[2] / 100 };
+}
+function trendHtml(t) {
+  if (!t) return '';
+  const k = t.d >= 0.005 ? 'up' : t.d <= -0.005 ? 'down' : 'flat';
+  const txt = k === 'flat' ? '= estável' : `${k === 'up' ? '▲' : '▼'} ${fmtPct(Math.abs(t.d))} p.p.`;
+  return `<span class="trend ${k}" title="Variação desde ${fmtPct(t.from)}% apurado">${txt}</span>`;
 }
 
 /* ---------- Estado (espelhado no #hash da URL) ---------- */
@@ -244,6 +293,7 @@ function changed(resetSel) {
   buildTabs(); buildSelects();
   $('#cands').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
   $('#cands').dataset.key = '';
+  $('#cardEvo').classList.add('loading');
   refreshNow();
 }
 
@@ -266,7 +316,20 @@ function bindUI() {
     else st.sel.has(b.dataset.sq) ? st.sel.delete(b.dataset.sq) : st.sel.add(b.dataset.sq);
     writeHash(); rerender();
   });
-  $('#map').addEventListener('click', e => { const t = e.target.closest('.tile'); if (t) setUf(st.uf === t.dataset.uf ? 'br' : t.dataset.uf); });
+  $('#map').addEventListener('click', e => {
+    const t = e.target.closest('.tile'); if (!t) return;
+    const uf = t.dataset.uf;
+    // no celular o 1º toque mostra o detalhe; o 2º toque (ou o botão) filtra
+    if (mapPtr !== 'mouse' && mapFocus !== uf && st.uf !== uf) { mapFocus = uf; renderMapDetail(); markFocus(); return; }
+    mapFocus = ''; setUf(st.uf === uf ? 'br' : uf);
+  });
+  $('#map').addEventListener('pointerdown', e => { mapPtr = e.pointerType; });
+  $('#map').addEventListener('pointerover', e => {
+    const t = e.target.closest('.tile'); if (!t || e.pointerType !== 'mouse' || mapFocus === t.dataset.uf) return;
+    mapFocus = t.dataset.uf; renderMapDetail(); markFocus();
+  });
+  $('#map').addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') { mapFocus = ''; renderMapDetail(); markFocus(); } });
+  $('#mapDetail').addEventListener('click', e => { const b = e.target.closest('.md-go'); if (b) { mapFocus = ''; setUf(b.dataset.uf); } });
   $('#cands').addEventListener('click', e => { const t = e.target.closest('.pano'); if (t) setUf(t.dataset.uf); });
   $('#paises').addEventListener('click', e => {
     const r = e.target.closest('.prow'); if (!r) return;
@@ -283,6 +346,7 @@ function bindUI() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNow(); });
   addEventListener('online', refreshNow);
   addEventListener('offline', updateLive);
+  addEventListener('pagehide', saveHist);
   addEventListener('hashchange', () => { readHash(); buildTabs(); buildSelects(); refreshNow(); });
 }
 function setUf(uf) {
@@ -331,6 +395,12 @@ function scopeName() {
   }
   const m = st.mun && MUN?.[st.uf]?.find(x => x.cd === st.mun);
   return m ? `${title(m.nm)} · ${st.uf.toUpperCase()}` : UFS[st.uf];
+}
+
+function scopeKey(k = st.cargo) {
+  if (st.uf === 'zz' && st.cidade) return urlDados(k, 'zz', st.cidade);
+  if (st.uf === 'zz' && st.pais) return `agg-c${CARGOS[k].cd}-${st.pais}`;
+  return urlDados(k, st.uf, st.mun);
 }
 
 function renderKpis(p) {
@@ -383,7 +453,7 @@ function candEl(c, fotoUf) {
       <div class="meta">${esc(c.sg)} · ${c.n}${c.vs[0] ? ` · ${vsLbl} ${esc(title(c.vs[0]))}` : ''}${c.com && c.com !== c.sg ? ` · ${esc(c.com)}` : ''}</div>
       <div class="bar"><i></i></div>
     </div>
-    <div class="nums"><div class="pct">0,00%</div><div class="votes">0 votos</div><div class="gap"></div></div>`;
+    <div class="nums"><div class="pct">0,00%</div><div class="votes">0 votos</div><div class="tr"></div><div class="gap"></div></div>`;
   return el;
 }
 
@@ -401,6 +471,7 @@ function renderMain(p) {
   const started = p.tot.st > 0;
   const list = p.cands.filter(c => (!st.sel.size || st.sel.has(c.sq)) && matchQ(c));
   const maxP = Math.max(1, ...p.cands.map(c => c.pvap));
+  const h = hist[scopeKey()];
 
   // FLIP: posições antes da reordenação
   const first = new Map();
@@ -421,6 +492,7 @@ function renderMain(p) {
     tween(pctEl, c.pvap, v => fmtPct(v) + '%');
     tween(el.querySelector('.votes'), c.vap, v => fmtInt(v) + ' votos');
     el.querySelector('.bar i').style.width = (c.pvap / maxP * 100) + '%';
+    el.querySelector('.tr').innerHTML = trendHtml(trendOf(h, c.sq));
     el.querySelector('.gap').textContent = started && rank > 1 && leaderVap ? `−${nf.format(leaderVap - c.vap)} do 1º` : '';
     let badge = '';
     if (c.st && !/não eleito/i.test(c.st)) badge = `<span class="badge${/2º turno/i.test(c.st) ? ' t2' : ''}">${esc(c.st)}</span>`;
@@ -435,6 +507,227 @@ function renderMain(p) {
     const dy = f - el.getBoundingClientRect().top;
     if (Math.abs(dy) > 1) el.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 650, easing: 'cubic-bezier(.2,.8,.2,1)' });
   }
+  renderEvo(p);
+}
+
+/* ---------- Gráfico de evolução: % de cada candidato × % de seções apuradas ---------- */
+const EVO_TOP = 5;
+const evo = { data: null, raf: 0, hi: -1, g: null };
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const lerp = (a, b, k) => a + (b - a) * k;
+
+function niceStep(range, n) {
+  const raw = range / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag;
+}
+const fmtAxis = v => (Math.abs(v) < 1e-9 ? 0 : v).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+
+// Curva monótona (Fritsch–Carlson, como d3.curveMonotoneX): suave e sem "inventar" picos entre os pontos
+function smoothPath(P) {
+  const n = P.length;
+  if (n < 2) return n ? `M${P[0][0]},${P[0][1]}` : '';
+  const t = new Array(n), s = [];
+  for (let i = 0; i < n - 1; i++) { const h = P[i + 1][0] - P[i][0]; s[i] = h ? (P[i + 1][1] - P[i][1]) / h : 0; }
+  for (let i = 1; i < n - 1; i++) {
+    const h0 = P[i][0] - P[i - 1][0], h1 = P[i + 1][0] - P[i][0], p = (s[i - 1] * h1 + s[i] * h0) / ((h0 + h1) || 1);
+    t[i] = (Math.sign(s[i - 1]) + Math.sign(s[i])) * Math.min(Math.abs(s[i - 1]), Math.abs(s[i]), 0.5 * Math.abs(p)) || 0;
+  }
+  t[0] = n > 2 ? (3 * s[0] - t[1]) / 2 : s[0];
+  t[n - 1] = n > 2 ? (3 * s[n - 2] - t[n - 2]) / 2 : s[0];
+  let d = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = P[i], [x1, y1] = P[i + 1], dx = (x1 - x0) / 3;
+    d += `C${(x0 + dx).toFixed(1)},${(y0 + dx * t[i]).toFixed(1)} ${(x1 - dx).toFixed(1)},${(y1 - dx * t[i + 1]).toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`;
+  }
+  return d;
+}
+
+function evoDomain(xs, series) {
+  const x0 = xs[0], x1 = Math.max(xs[xs.length - 1], x0 + 0.5);
+  let lo = Infinity, hi = -Infinity;
+  for (const s of series) for (const v of s.ys) if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  const pad = Math.max((hi - lo) * 0.12, 0.6);
+  lo = Math.max(0, lo - pad); hi = Math.min(100, hi + pad);
+  const step = niceStep(hi - lo, 4);
+  return { x0, x1, y0: Math.max(0, Math.floor(lo / step) * step), y1: Math.min(100, Math.ceil(hi / step) * step) };
+}
+
+function renderEvo(p) {
+  const card = $('#cardEvo');
+  card.classList.remove('loading');
+  card.hidden = !p;
+  if (!p) { evo.data = null; return; }
+  const key = scopeKey(), h = hist[key], pts = h?.pts || [];
+  const col = new Map((h?.sq || []).map((sq, i) => [sq, i + 3]));
+  const show = p.cands.filter(c => (!st.sel.size || st.sel.has(c.sq)) && matchQ(c)).slice(0, st.sel.size ? 8 : EVO_TOP);
+  const series = show.map(c => ({ c, color: colorOf(c), ys: pts.map(q => q[col.get(c.sq)] == null ? null : q[col.get(c.sq)] / 100) }));
+
+  $('#evoLegend').innerHTML = series.map(s => `<span class="evo-key" style="--c:${s.color}"><i></i><span class="evo-nm">${esc(s.c.nm)}</span><b>${fmtPct(s.c.pvap)}%</b>${trendHtml(trendOf(h, s.c.sq))}</span>`).join('');
+
+  const ok = pts.length >= 2 && series.length > 0;
+  const empty = $('#evoEmpty');
+  empty.hidden = ok;
+  $('#evoPlot').classList.toggle('blank', !ok);
+  if (!ok) {
+    empty.textContent = !series.length ? 'Nenhum candidato corresponde ao filtro.'
+      : !p.tot.st ? 'O gráfico começa assim que o TSE divulgar as primeiras parciais.'
+      : `Primeira parcial registrada (${fmtPct(p.tot.pst)}% apurado). As linhas aparecem na próxima atualização do TSE — deixe a página aberta.`;
+    $('#evoSvg').innerHTML = ''; $('#evoTip').hidden = true;
+    $('#evoNote').textContent = '';
+    evo.data = null;
+    return;
+  }
+  const xs = pts.map(q => q[2] / 100);
+  $('#evoNote').textContent = `Registrado neste navegador desde ${fmtPct(xs[0])}% apurado · ${pts.length} parciais. ${matchMedia('(pointer:coarse)').matches ? 'Toque e arraste' : 'Passe o mouse'} no gráfico para ver cada momento.`;
+
+  const sig = key + '|' + series.map(s => s.c.sq + s.color).join(',');
+  const stamp = pts[pts.length - 1].join();
+  const prev = evo.data;
+  if (prev && prev.sig === sig && prev.stamp === stamp && prev.n === pts.length) return; // nada novo
+  const d = { sig, stamp, n: pts.length, xs, pts, series, dom: evoDomain(xs, series), last: { x: xs[xs.length - 1], ys: series.map(s => s.ys[s.ys.length - 1]) } };
+  evo.data = d;
+  cancelAnimationFrame(evo.raf);
+  const same = prev && prev.sig === sig;
+  if (!same) { evo.hi = -1; evoBuild(d); }
+  const animate = same && (d.n === prev.n || d.n === prev.n + 1) && !document.hidden && !reduceMotion.matches;
+  if (!animate) { evoPaint(d.dom, null, 1); return; }
+  // a ponta das linhas "cresce" do último ponto até o novo, e os eixos se ajustam juntos
+  const t0 = performance.now(), from = prev.last, fromDom = prev.dom;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / 900), e = 1 - Math.pow(1 - k, 3);
+    evoPaint({ x0: lerp(fromDom.x0, d.dom.x0, e), x1: lerp(fromDom.x1, d.dom.x1, e), y0: lerp(fromDom.y0, d.dom.y0, e), y1: lerp(fromDom.y1, d.dom.y1, e) }, from, e);
+    if (k < 1) evo.raf = requestAnimationFrame(step);
+  };
+  evo.raf = requestAnimationFrame(step);
+}
+
+function evoBuild(d) {
+  const rev = d.series.map((s, i) => [s, i]).reverse(); // 1º colocado desenhado por cima
+  $('#evoSvg').innerHTML = `<defs><clipPath id="evoClip"><rect></rect></clipPath>${d.series.map((s, i) =>
+    `<linearGradient id="evoG${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".14"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`).join('')}</defs>
+    <g class="evo-grid"></g>
+    <g clip-path="url(#evoClip)">
+      ${rev.map(([s, i]) => `<path class="evo-area draw" data-i="${i}" fill="url(#evoG${i})"></path>`).join('')}
+      ${rev.map(([s, i]) => `<path class="evo-line draw" data-i="${i}" pathLength="1" style="--c:${s.color}"></path>`).join('')}
+    </g>
+    <g class="evo-cross" hidden><line></line>${d.series.map((s, i) => `<circle r="4.5" data-i="${i}" style="--c:${s.color}"></circle>`).join('')}</g>
+    <g class="evo-ends draw">${rev.map(([s, i]) => `<g data-i="${i}" style="--c:${s.color}"><line class="evo-lead"></line><circle class="evo-pulse" r="4"></circle><circle class="evo-dot" r="4.5"></circle><text></text></g>`).join('')}</g>`;
+}
+
+function evoPaint(dom, from, k) {
+  const d = evo.data, box = $('#evoPlot'), svg = $('#evoSvg');
+  const W = box.clientWidth;
+  if (!d || W < 60 || !svg.firstChild) return;
+  const mobile = W < 520, H = mobile ? 210 : 250;
+  const m = { t: 12, r: mobile ? 50 : 58, b: 26, l: mobile ? 32 : 38 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('height', H);
+  const X = x => m.l + (x - dom.x0) / ((dom.x1 - dom.x0) || 1) * pw;
+  const Y = y => m.t + (1 - (y - dom.y0) / ((dom.y1 - dom.y0) || 1)) * ph;
+  const r = svg.querySelector('#evoClip rect');
+  r.setAttribute('x', m.l - 4); r.setAttribute('y', m.t - 6); r.setAttribute('width', pw + 8); r.setAttribute('height', ph + 12);
+
+  // grade e eixos
+  const ys = niceStep(dom.y1 - dom.y0, mobile ? 3 : 4), xsS = niceStep(dom.x1 - dom.x0, Math.max(2, Math.floor(pw / 80)));
+  let g = '';
+  for (let v = Math.ceil(dom.y0 / ys - 1e-9) * ys; v <= dom.y1 + 1e-9; v += ys) {
+    const y = Y(v).toFixed(1);
+    g += `<line x1="${m.l}" x2="${m.l + pw}" y1="${y}" y2="${y}"></line><text x="${m.l - 8}" y="${y}" dy=".32em" text-anchor="end">${fmtAxis(v)}</text>`;
+  }
+  for (let v = Math.ceil(dom.x0 / xsS - 1e-9) * xsS; v <= dom.x1 + 1e-9; v += xsS) {
+    const x = X(v);
+    if (x < m.l + 14 || x > m.l + pw - 14) continue;
+    g += `<text x="${x.toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtAxis(v)}</text>`;
+  }
+  g += `<text class="evo-ax" x="${m.l}" y="${H - 6}">${fmtAxis(d.xs[0])}</text><text class="evo-ax" x="${m.l + pw}" y="${H - 6}" text-anchor="end">${fmtAxis(d.last.x)} apurado</text>`;
+  svg.querySelector('.evo-grid').innerHTML = g;
+
+  // linhas, áreas e pontas
+  const n = d.xs.length, lx = from ? lerp(from.x, d.last.x, k) : d.last.x, bottom = m.t + ph;
+  const ends = [];
+  d.series.forEach((s, i) => {
+    const P = [];
+    for (let j = 0; j < n - 1; j++) if (s.ys[j] != null) P.push([X(d.xs[j]), Y(s.ys[j])]);
+    let ly = s.ys[n - 1];
+    if (from && ly != null && from.ys[i] != null) ly = lerp(from.ys[i], ly, k);
+    if (ly != null) { P.push([X(lx), Y(ly)]); ends.push({ i, x: X(lx), y: Y(ly), v: ly, ly: Y(ly) }); }
+    const path = smoothPath(P);
+    svg.querySelector(`.evo-line[data-i="${i}"]`).setAttribute('d', path);
+    svg.querySelector(`.evo-area[data-i="${i}"]`).setAttribute('d', P.length > 1 ? `${path}L${P[P.length - 1][0].toFixed(1)},${bottom}L${P[0][0].toFixed(1)},${bottom}Z` : '');
+  });
+  // rótulos na ponta: afastados para não se sobreporem, com linha-guia até a ponta
+  ends.sort((a, b) => a.ly - b.ly);
+  const gap = 15;
+  for (let j = 1; j < ends.length; j++) ends[j].ly = Math.max(ends[j].ly, ends[j - 1].ly + gap);
+  const over = ends.length ? ends[ends.length - 1].ly - (bottom + 4) : 0;
+  if (over > 0) for (let j = ends.length - 1; j >= 0; j--) ends[j].ly = j === ends.length - 1 ? ends[j].ly - over : Math.min(ends[j].ly, ends[j + 1].ly - gap);
+  const tx = m.l + pw + 12;
+  for (const e of ends) {
+    const el = svg.querySelector(`.evo-ends g[data-i="${e.i}"]`);
+    el.querySelector('.evo-dot').setAttribute('cx', e.x); el.querySelector('.evo-dot').setAttribute('cy', e.y);
+    el.querySelector('.evo-pulse').setAttribute('cx', e.x); el.querySelector('.evo-pulse').setAttribute('cy', e.y);
+    const ln = el.querySelector('.evo-lead');
+    ln.setAttribute('x1', e.x + 6); ln.setAttribute('y1', e.y); ln.setAttribute('x2', tx - 3); ln.setAttribute('y2', e.ly);
+    const t = el.querySelector('text');
+    t.setAttribute('x', tx); t.setAttribute('y', e.ly); t.setAttribute('dy', '.32em');
+    t.textContent = e.v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+  }
+  evo.g = { m, pw, ph, W, H, X, Y };
+  if (evo.hi >= 0) evoHover();
+}
+
+function evoHover() {
+  const d = evo.data, g = evo.g, cross = $('#evoSvg .evo-cross'), tip = $('#evoTip');
+  if (!d || !g || !cross) return;
+  if (evo.hi < 0) { cross.setAttribute('hidden', ''); tip.hidden = true; return; }
+  const j = Math.min(evo.hi, d.n - 1), x = g.X(d.xs[j]);
+  cross.removeAttribute('hidden');
+  const ln = cross.querySelector('line');
+  ln.setAttribute('x1', x); ln.setAttribute('x2', x); ln.setAttribute('y1', g.m.t); ln.setAttribute('y2', g.m.t + g.ph);
+  d.series.forEach((s, i) => {
+    const c = cross.querySelector(`circle[data-i="${i}"]`), v = s.ys[j];
+    c.style.display = v == null ? 'none' : '';
+    if (v != null) { c.setAttribute('cx', x); c.setAttribute('cy', g.Y(v)); }
+  });
+  const rows = d.series.map(s => ({ s, v: s.ys[j] })).filter(r => r.v != null).sort((a, b) => b.v - a.v);
+  const hg = d.pts[j][0];
+  tip.innerHTML = `<header>${fmtPct(d.xs[j])}% apurado${hg ? ` · ${esc(hg)}` : ''}</header>` +
+    rows.map(r => `<div style="--c:${r.s.color}"><i></i><b>${fmtPct(r.v)}%</b><span>${esc(r.s.c.nm)}</span></div>`).join('');
+  tip.hidden = false;
+  const w = tip.offsetWidth;
+  let left = x + 14;
+  if (left + w > g.W) left = x - 14 - w;
+  tip.style.left = Math.max(0, left) + 'px';
+  tip.style.top = g.m.t + 'px';
+}
+
+function bindEvo() {
+  const box = $('#evoPlot');
+  const pick = e => {
+    const d = evo.data, g = evo.g; if (!d || !g) return;
+    const px = e.clientX - box.getBoundingClientRect().left;
+    let best = 0, bd = Infinity;
+    d.xs.forEach((x, j) => { const dd = Math.abs(g.X(x) - px); if (dd < bd) { bd = dd; best = j; } });
+    evo.hi = best; evoHover();
+  };
+  box.addEventListener('pointermove', pick);
+  box.addEventListener('pointerdown', pick);
+  box.addEventListener('pointerleave', () => { evo.hi = -1; evoHover(); });
+  box.addEventListener('keydown', e => {
+    const d = evo.data; if (!d || !/Arrow(Left|Right)/.test(e.key)) return;
+    e.preventDefault();
+    evo.hi = Math.max(0, Math.min(d.n - 1, (evo.hi < 0 ? d.n - 1 : evo.hi) + (e.key === 'ArrowLeft' ? -1 : 1)));
+    evoHover();
+  });
+  box.addEventListener('focus', () => { if (evo.data && evo.hi < 0) { evo.hi = evo.data.n - 1; evoHover(); } });
+  box.addEventListener('blur', () => { evo.hi = -1; evoHover(); });
+  let lastW = 0;
+  new ResizeObserver(() => {
+    const w = box.clientWidth;
+    if (w === lastW || !evo.data) return;
+    lastW = w; cancelAnimationFrame(evo.raf); evoPaint(evo.data.dom, null, 1);
+  }).observe(box);
 }
 
 /* Governador/Senador com "Brasil": panorama dos 27 estados */
@@ -446,6 +739,7 @@ function renderPanorama() {
   agg.tot.pst = agg.tot.ts ? agg.tot.st / agg.tot.ts * 100 : 0;
   renderKpis(agg);
   renderChips(null);
+  renderEvo(null);
   const top = CARGOS[st.cargo].cd === '0005' ? 3 : 2;
   datas.sort((a, b) => UFS[a[0]].localeCompare(UFS[b[0]], 'pt-BR'));
   box.innerHTML = datas.map(([uf, p]) => `
@@ -486,18 +780,45 @@ function renderMap() {
     const color = c ? colorOf(c) : '#2a3550';
     const pst = p?.tot.pst || 0;
     const name = uf === 'zz' ? 'EXT' : uf.toUpperCase();
-    return `<div class="tile${uf === 'zz' ? ' ext' : ''}${st.uf === uf ? ' sel' : ''}" data-uf="${uf}" style="grid-column:${x};grid-row:${y};--c:${color};--a:${a.toFixed(3)}" title="${uf === 'zz' ? 'Exterior' : UFS[uf]}${c && c.vap ? ` · ${esc(c.nm)} ${fmtPct(c.pvap)}%` : ''} · ${fmtPct(pst)}% apurado">
+    return `<div class="tile${uf === 'zz' ? ' ext' : ''}${st.uf === uf ? ' sel' : ''}${mapFocus === uf ? ' focus' : ''}" data-uf="${uf}" style="grid-column:${x};grid-row:${y};--c:${color};--a:${a.toFixed(3)}" title="${uf === 'zz' ? 'Exterior' : UFS[uf]}${c && c.vap ? ` · ${esc(c.nm)} ${fmtPct(c.pvap)}%` : ''} · ${fmtPct(pst)}% apurado">
       <b>${name}</b><small>${esc(label)}</small><span class="tp" style="width:${pst}%"></span></div>`;
   }).join('');
-  $('#mapHint').textContent = single ? 'Intensidade = % do candidato selecionado' : nac ? 'Cor = quem lidera · barra = % apurado' : 'Cor = partido que lidera · barra = % apurado';
+  $('#mapHint').textContent = hoverOk() ? 'Passe o mouse para detalhes · clique para filtrar' : 'Toque em um estado para ver detalhes';
+  $('#mapKey').innerHTML = single
+    ? '<span><b>45%</b> = votos do candidato selecionado no estado</span><span><i class="k-bar"></i> = urnas apuradas</span>'
+    : `<span><i class="k-tile"></i> cor = ${nac ? 'quem lidera' : 'partido que lidera'}</span><span><b>45%</b> = votos de quem lidera</span><span><i class="k-bar"></i> = urnas apuradas</span>`;
   $('#legend').innerHTML = single
     ? (() => { const c = current?.p.cands.find(x => x.sq === single); return c ? `<span style="--c:${colorOf(c)}"><i></i>${esc(c.nm)} — quanto mais forte, maior o percentual</span>` : ''; })()
-    : [...leaders.values()].sort((a, b) => b.n - a.n).map(({ c, n, lbl }) => `<span style="--c:${colorOf(c)}"><i></i>${esc(lbl)} · ${n}</span>`).join('');
+    : [...leaders.values()].sort((a, b) => b.n - a.n).map(({ c, n, lbl }) => `<span style="--c:${colorOf(c)}"><i></i>${esc(lbl)} · lidera em ${n}</span>`).join('');
+  renderMapDetail();
+}
+
+function markFocus() { for (const t of $('#map').children) t.classList.toggle('focus', t.dataset.uf === mapFocus); }
+
+/* Detalhe do estado: hover no computador, toque no celular */
+const hoverOk = () => matchMedia('(hover: hover) and (pointer: fine)').matches;
+let mapFocus = '', mapPtr = 'mouse';
+function renderMapDetail() {
+  const box = $('#mapDetail');
+  const uf = mapFocus || (TILES[st.uf] ? st.uf : '');
+  const p = uf && mapData[st.cargo + uf];
+  if (!p) { box.innerHTML = `<div class="md-empty">${hoverOk() ? 'Passe o mouse sobre' : 'Toque em'} um estado para ver urnas apuradas e quem lidera.</div>`; return; }
+  const nome = uf === 'zz' ? 'Exterior' : UFS[uf];
+  const nac = CARGOS[st.cargo].nacional;
+  const list = p.cands.filter(c => !nac || !st.sel.size || st.sel.has(c.sq)).slice(0, 3);
+  box.innerHTML = `
+    <div class="md-h"><b>${nome}</b><span><strong>${fmtPct(p.tot.pst)}%</strong> das urnas apuradas</span></div>
+    <div class="md-bar"><i style="width:${Math.min(100, p.tot.pst)}%"></i></div>
+    ${p.tot.st ? list.map((c, i) => `<div class="md-row" style="--c:${colorOf(c)}"><i></i><span>${i + 1}º ${esc(c.nm)} <small>${esc(c.sg)}</small></span><small>${nf.format(c.vap)} votos</small><b>${fmtPct(c.pvap)}%</b></div>`).join('')
+      : '<div class="md-empty">Apuração ainda não começou neste estado.</div>'}
+    ${st.uf !== uf ? `<button class="md-go" data-uf="${uf}">Abrir ${nome} completo →</button>` : ''}`;
 }
 async function loadMap() {
   const k = st.cargo;
   const ufs = Object.keys(UFS).concat(CARGOS[k].nacional ? ['zz'] : []);
-  await pool(ufs, 7, async uf => { try { mapData[k + uf] = await load(urlDados(k, uf)); } catch { /* mantém anterior */ } });
+  await pool(ufs, 7, async uf => {
+    try { mapData[k + uf] = await load(urlDados(k, uf)); record(urlDados(k, uf), mapData[k + uf]); } catch { /* mantém anterior */ }
+  });
 }
 
 /* ---------- Exterior por país ---------- */
@@ -542,7 +863,7 @@ function renderPaises() {
 /* ---------- Carga do recorte principal ---------- */
 let mainSeq = 0;
 async function loadMain() {
-  const my = ++mainSeq, k = st.cargo;
+  const my = ++mainSeq, k = st.cargo, key = scopeKey();
   if (st.uf === 'br' && !CARGOS[k].nacional) { await loadMap(); if (my === mainSeq) renderPanorama(); return; }
   let p;
   if (st.uf === 'zz' && st.cidade) p = await load(urlDados(k, 'zz', st.cidade));
@@ -550,6 +871,7 @@ async function loadMain() {
     const arr = await pool(citiesOf(st.pais), 6, c => load(urlDados(k, 'zz', c.cd)).then(x => (cityData.set(c.cd, x), x)).catch(() => null));
     p = aggregate(arr);
   } else p = await load(urlDados(k, st.uf, st.mun));
+  record(key, p);
   if (my === mainSeq) renderMain(p);
 }
 
@@ -584,6 +906,7 @@ async function tick() {
     loadPaises(); // em paralelo, sem bloquear o ciclo
   } finally {
     running = false;
+    saveHist();
     $('#btnRefresh').classList.remove('spin');
     updateLive(); startRing();
     timer = setTimeout(tick, REFRESH_MS);
@@ -595,7 +918,7 @@ function refreshNow() { current = null; tick(); }
 (async function init() {
   readHash();
   if (TURNO === 2) $('#sub').textContent = 'Eleições Gerais · 2º turno · dados oficiais do TSE';
-  buildTabs(); buildSelects(); bindUI();
+  buildTabs(); buildSelects(); bindUI(); bindEvo();
   $('#cands').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
   setInterval(updateLive, 5000);
   tick();

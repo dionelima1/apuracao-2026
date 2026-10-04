@@ -65,6 +65,16 @@
       <div class="progress"><i id="pstBar"></i></div>
       <div class="kpis" id="kpis"></div>
     </div>
+    <div class="card evo" id="cardEvo" hidden>
+      <div class="card-h"><h3>Evolução na apuração</h3><span class="hint">% dos votos válidos conforme as seções são apuradas</span></div>
+      <div class="evo-legend" id="evoLegend"></div>
+      <div class="evo-plot" id="evoPlot" tabindex="0" aria-label="Gráfico da evolução dos candidatos durante a apuração">
+        <svg id="evoSvg" aria-hidden="true"></svg>
+        <div class="evo-tip" id="evoTip" hidden></div>
+        <div class="evo-empty" id="evoEmpty" hidden></div>
+      </div>
+      <p class="evo-note" id="evoNote"></p>
+    </div>
     <div class="card list-card">
       <div class="cands" id="cands"></div>
     </div>
@@ -73,7 +83,9 @@
   <aside class="col-side">
     <div class="card">
       <div class="card-h"><h3>Mapa da apuração</h3><span class="hint" id="mapHint">Clique em um estado</span></div>
+      <div class="map-key" id="mapKey"></div>
       <div class="tilemap" id="map"></div>
+      <div class="map-detail" id="mapDetail"></div>
       <div class="legend" id="legend"></div>
     </div>
     <div class="card" id="cardPaises" hidden>
