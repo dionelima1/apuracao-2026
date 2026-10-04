@@ -827,21 +827,49 @@ function renderEleitorado() {
   const rows = Object.keys(TILES).filter(uf => uf !== 'zz' || nac).map(uf => ({ uf, p: mapData[k + uf] })).filter(r => r.p?.tot.te);
   const box = $('#eleit'), more = $('#eleitMore');
   if (!rows.length) { box.innerHTML = '<div class="empty">Carregando estados…</div>'; $('#eleitTot').textContent = ''; more.hidden = true; return; }
+  box.querySelector('.empty')?.remove();
   rows.sort((a, b) => b.p.tot.te - a.p.tot.te);
   const total = rows.reduce((a, r) => a + r.p.tot.te, 0), max = rows[0].p.tot.te;
   const apTot = rows.reduce((a, r) => a + eleitApur(r.p.tot), 0);
   $('#eleitTot').innerHTML = `<div><b>${nf.format(total)}</b> eleitores aptos${nac ? ' (com exterior)' : ''}</div>
     <div><b>${nf.format(apTot)}</b> já apurados <span>(${fmtPct(apTot / total * 100)}%)</span> · faltam <b>${nf.format(total - apTot)}</b></div>
     ${rows.length < esperado ? `<div>${rows.length} de ${esperado} estados carregados</div>` : ''}`;
-  box.innerHTML = (eleitAll ? rows : rows.slice(0, 10)).map((r, i) => {
+  // linhas reaproveitadas entre atualizações, para as fotos não piscarem
+  const shown = eleitAll ? rows : rows.slice(0, 10), keep = new Set(shown.map(r => r.uf));
+  for (const el of [...box.children]) if (!keep.has(el.dataset.uf)) el.remove();
+  shown.forEach((r, i) => {
     const t = r.p.tot, te = t.te, ap = eleitApur(t), nome = r.uf === 'zz' ? 'Exterior' : UFS[r.uf];
-    const sub = !ap ? 'aguardando apuração' : ap >= te ? 'todos apurados' : `${fmtPct(ap / te * 100)}% dos eleitores · faltam ${nfc.format(te - ap)}`;
-    return `<div class="erow${st.uf === r.uf ? ' sel' : ''}" data-uf="${r.uf}" title="${nome}: ${nf.format(te)} eleitores aptos (${fmtPct(te / total * 100)}% do total) · ${nf.format(ap)} já apurados · ${fmtPct(t.pst)}% das urnas">
-      <span class="er-n">${i + 1}º</span>
-      <div><div class="er-h"><b>${nome}</b><span><strong>${nfc.format(ap)}</strong> de ${nfc.format(te)}</span></div>
-      <div class="er-bar"><span style="width:${(te / max * 100).toFixed(1)}%"><i style="width:${(ap / te * 100).toFixed(1)}%"></i></span></div>
-      <div class="er-sub">${sub}</div></div></div>`;
-  }).join('');
+    let el = box.querySelector(`.erow[data-uf="${r.uf}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'erow'; el.dataset.uf = r.uf;
+      el.innerHTML = `<span class="er-n"></span><div><div class="er-h"><b>${nome}</b><span></span></div>
+        <div class="er-bar"><span><i></i></span></div><div class="er-sub"></div><div class="er-lead" hidden></div></div>`;
+    }
+    el.classList.toggle('sel', st.uf === r.uf);
+    el.title = `${nome}: ${nf.format(te)} eleitores aptos (${fmtPct(te / total * 100)}% do total) · ${nf.format(ap)} já apurados · ${fmtPct(t.pst)}% das urnas`;
+    el.querySelector('.er-n').textContent = `${i + 1}º`;
+    el.querySelector('.er-h span').innerHTML = `<strong>${nfc.format(ap)}</strong> de ${nfc.format(te)}`;
+    el.querySelector('.er-bar span').style.width = (te / max * 100).toFixed(1) + '%';
+    el.querySelector('.er-bar i').style.width = (ap / te * 100).toFixed(1) + '%';
+    el.querySelector('.er-sub').textContent = !ap ? 'aguardando apuração' : ap >= te ? 'todos apurados' : `${fmtPct(ap / te * 100)}% dos eleitores · faltam ${nfc.format(te - ap)}`;
+    // quem está na frente no estado: foto, nome, partido e %
+    const lead = r.p.cands[0], ld = el.querySelector('.er-lead');
+    if (lead && lead.vap > 0) {
+      const id = k + lead.sq;
+      if (ld.dataset.id !== id) {
+        ld.dataset.id = id;
+        ld.style.setProperty('--c', colorOf(lead));
+        const ini = lead.nm.split(/\s+/).slice(0, 2).map(w => w[0]).join('');
+        ld.innerHTML = `<small class="er-lbl">na frente</small><span class="er-ph"><span>${esc(ini)}</span><img loading="lazy" alt="" src="${urlFoto(k, r.uf, lead.sq)}" onerror="this.remove()"></span>
+          <span class="er-nm"><b>${esc(lead.nm)}</b> <small>${esc(lead.sg)}</small></span><strong class="er-pct"></strong>`;
+      }
+      ld.querySelector('.er-pct').textContent = fmtPct(lead.pvap) + '%';
+      ld.title = `${lead.full || lead.nm} (${lead.sg}) · ${fmtPct(lead.pvap)}% dos votos válidos em ${nome}`;
+      ld.hidden = false;
+    } else { ld.hidden = true; ld.dataset.id = ''; }
+    box.appendChild(el);
+  });
   more.hidden = rows.length <= 10;
   more.textContent = eleitAll ? 'Mostrar só os 10 maiores' : `Ver todos (${rows.length})`;
 }
