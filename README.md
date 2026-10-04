@@ -14,7 +14,6 @@ Painel em tempo real da apuração das **Eleições Gerais 2026**, com dados ofi
 - Filtros ficam no link (`#c=pres&uf=sp&cand=...`); é só compartilhar
 
 ## Parâmetros
-- `?simular=1` → números fictícios para testar a interface antes da apuração
 - `?turno=2` → 2º turno (códigos 6258/6260)
 
 Site independente, sem vínculo com o TSE.
