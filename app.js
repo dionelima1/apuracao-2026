@@ -914,6 +914,23 @@ async function tick() {
 }
 function refreshNow() { current = null; tick(); }
 
+/* ---------- Atualização automática do próprio site ----------
+   Abas abertas recarregam sozinhas quando sai uma versão nova (filtros ficam no #hash, histórico no localStorage) */
+const APP_V = document.querySelector('meta[name="app-version"]')?.content || '';
+async function checkVersion() {
+  if (!APP_V || document.hidden) return;
+  try {
+    const r = await fetch(`index.html?_=${Date.now()}`, { cache: 'no-store' });
+    const v = (await r.text()).match(/name="app-version" content="([^"]+)"/)?.[1];
+    if (!v || v === APP_V || sessionStorage.getItem('apu26-reload') === v) return;
+    sessionStorage.setItem('apu26-reload', v);
+    toast('Nova versão do site — atualizando…');
+    histDirty = true; saveHist();
+    const q = new URLSearchParams(location.search); q.set('v', v);
+    setTimeout(() => location.replace(`${location.pathname}?${q}${location.hash}`), 1500);
+  } catch { /* sem rede: tenta de novo depois */ }
+}
+
 /* ---------- Início ---------- */
 (async function init() {
   readHash();
@@ -921,6 +938,8 @@ function refreshNow() { current = null; tick(); }
   buildTabs(); buildSelects(); bindUI(); bindEvo();
   $('#cands').innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
   setInterval(updateLive, 5000);
+  setInterval(checkVersion, 120000);
+  document.addEventListener('visibilitychange', checkVersion);
   tick();
   await loadMunicipios();
   buildSelects();
