@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apuração 2026</title>
+<meta name="description" content="Apuração em tempo real das Eleições 2026 com dados oficiais do TSE — filtros por estado, município, país e candidato.">
+<meta name="theme-color" content="#070b14">
+<link rel="icon" href="https://img.icons8.com/ios-filled/50/22c55e/ballot.png">
+<link rel="preconnect" href="https://resultados.tse.jus.br" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="bg-glow" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo"><img src="https://img.icons8.com/ios-filled/50/070b14/ballot.png" alt=""></div>
+    <div>
+      <h1>Apuração 2026</h1>
+      <p id="sub">Eleições Gerais · dados oficiais do TSE</p>
+    </div>
+  </div>
+  <div class="top-right">
+    <div class="live" id="live" data-state="wait"><span class="dot"></span><span id="liveTxt">Conectando…</span></div>
+    <div class="upd">
+      <svg class="ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15" class="ring-bg"/><circle cx="18" cy="18" r="15" class="ring-fg" id="ring"/></svg>
+      <div class="upd-txt"><small>Última totalização TSE</small><b id="tseHora">—</b></div>
+    </div>
+    <button class="icon-btn" id="btnRefresh" title="Atualizar agora"><img src="https://img.icons8.com/ios-filled/50/c9d3e3/refresh.png" alt="Atualizar"></button>
+    <button class="icon-btn" id="btnShare" title="Copiar link com os filtros"><img src="https://img.icons8.com/ios-filled/50/c9d3e3/share.png" alt="Compartilhar"></button>
+  </div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<nav class="tabs" id="tabsCargo" role="tablist"></nav>
+
+<section class="filters">
+  <label class="fld"><span><img src="https://img.icons8.com/ios-filled/50/7d8aa3/marker.png" alt="">Abrangência</span><select id="selUf"></select></label>
+  <label class="fld" id="fldMun" hidden><span>Município</span><select id="selMun"></select></label>
+  <label class="fld" id="fldPais" hidden><span><img src="https://img.icons8.com/ios-filled/50/7d8aa3/globe.png" alt="">País</span><select id="selPais"></select></label>
+  <label class="fld" id="fldCidade" hidden><span>Cidade</span><select id="selCidade"></select></label>
+  <label class="fld grow"><span><img src="https://img.icons8.com/ios-filled/50/7d8aa3/search.png" alt="">Candidato</span><input id="q" type="search" placeholder="Nome, partido ou número" autocomplete="off"></label>
+</section>
+
+<div class="chips" id="chips"></div>
+
+<main class="grid">
+  <section class="col-main">
+    <div class="card scope">
+      <div class="scope-h">
+        <div>
+          <span class="eyebrow" id="scopeCargo">Presidente</span>
+          <h2 id="scopeTitle">Brasil</h2>
+        </div>
+        <div class="apurado">
+          <div class="apurado-num"><b id="pst">0,00</b><span>%</span></div>
+          <small>seções totalizadas</small>
+        </div>
+      </div>
+      <div class="progress"><i id="pstBar"></i></div>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="card list-card">
+      <div class="cands" id="cands"></div>
+    </div>
+  </section>
+
+  <aside class="col-side">
+    <div class="card">
+      <div class="card-h"><h3>Mapa da apuração</h3><span class="hint" id="mapHint">Clique em um estado</span></div>
+      <div class="tilemap" id="map"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="card" id="cardPaises" hidden>
+      <div class="card-h"><h3>Exterior por país</h3><span class="hint" id="paisesProg"></span></div>
+      <div class="paises" id="paises"></div>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot">
+  <p>Fonte: TSE · <a href="https://resultados.tse.jus.br" target="_blank" rel="noopener">resultados.tse.jus.br</a>. Site independente, não oficial. Atualiza sozinho a cada 15 s.</p>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="paises.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
