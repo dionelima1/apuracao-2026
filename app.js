@@ -4,7 +4,6 @@
 const BASE = 'https://resultados.tse.jus.br/oficial/ele2026';
 const qs = new URLSearchParams(location.search);
 const TURNO = qs.get('turno') === '2' ? 2 : 1;
-const SIM = qs.has('simular');
 const ELE = TURNO === 1 ? { fed: '6257', est: '6259' } : { fed: '6258', est: '6260' };
 const CARGOS = {
   pres: { nome: 'Presidente', ele: 'fed', cd: '0001', nacional: true },
@@ -124,25 +123,6 @@ function aggregate(list) {
   return finalize({ cands, tot, nv: list[0]?.nv || 1, dg: last?.dg, hg: last?.hg, tf: false });
 }
 
-/* Modo simulação (?simular=1): números fictícios e neutros para testar a interface antes da apuração */
-const T0 = Date.now();
-function hash(s) { let h = 2166136261; for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; }
-function simular(p, key) {
-  const prog = Math.min(1, 0.04 + (Date.now() - T0) / 240000);
-  const te = p.tot.te || 50000, c = Math.round(te * 0.8 * prog), vv = Math.round(c * 0.92);
-  // o último fator faz cada candidato subir ou cair ao longo da apuração, para testar o gráfico de evolução
-  const w = p.cands.map(x => Math.pow(hash(x.sq) * 0.85 + hash(x.sq + key) * 0.3, 4) * (1 + (hash(x.sq + 'tend') - 0.5) * 1.4 * prog));
-  const sw = w.reduce((a, b) => a + b, 0) || 1;
-  p.cands.forEach((x, i) => { x.vap = Math.round(vv * w[i] / sw); x.pvap = vv ? x.vap / vv * 100 : 0; });
-  Object.assign(p.tot, {
-    pst: prog * 100, st: Math.round(p.tot.ts * prog), c, pc: c / te * 100, a: Math.round(te * prog) - c,
-    pa: 20, vv, pvv: 92, vb: Math.round(c * 0.03), pvb: 3, vn: c - vv - Math.round(c * 0.03), pvn: 5,
-  });
-  const now = new Date();
-  p.dg = now.toLocaleDateString('pt-BR'); p.hg = now.toLocaleTimeString('pt-BR');
-  return finalize(p);
-}
-
 /* ---------- Camada de dados: cache + deduplicação + tolerância a falhas ---------- */
 const cache = new Map();
 const inflight = new Map();
@@ -155,7 +135,6 @@ function load(url, maxAge = REFRESH_MS - 1500) {
   const pr = (async () => {
     try {
       let p = parse(await getJSON(url));
-      if (SIM) p = simular(p, url);
       cache.set(url, { p, at: Date.now() });
       health.okAt = Date.now(); health.fails = 0;
       return p;
@@ -174,7 +153,7 @@ function load(url, maxAge = REFRESH_MS - 1500) {
 const HIST_KEY = `apu26-evo-v1-t${TURNO}`;
 const HIST_MAX = 300;
 let hist = {}, histDirty = false;
-if (!SIM) try { const h = JSON.parse(localStorage.getItem(HIST_KEY)); if (h && typeof h === 'object') hist = h; } catch { }
+try { const h = JSON.parse(localStorage.getItem(HIST_KEY)); if (h && typeof h === 'object') hist = h; } catch { }
 
 function record(key, p) {
   const t = p?.tot;
@@ -195,7 +174,7 @@ function record(key, p) {
   histDirty = true;
 }
 function saveHist() {
-  if (!histDirty || SIM) return;
+  if (!histDirty) return;
   histDirty = false;
   try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch {
     // sem espaço: fica só com o cargo atual
@@ -428,8 +407,7 @@ function renderKpis(p) {
 function setBanner(p) {
   const b = $('#banner');
   let msg = '';
-  if (SIM) msg = 'Modo simulação: os números são fictícios, gerados só para testar a página. Remova ?simular=1 do endereço para ver os dados reais.';
-  else if (p && p.tot.st === 0) msg = 'A apuração ainda não começou. As urnas fecham às 17h (horário de Brasília); a página atualiza sozinha assim que o TSE divulgar os primeiros números.';
+  if (p && p.tot.st === 0) msg = 'A apuração ainda não começou. As urnas fecham às 17h (horário de Brasília); a página atualiza sozinha assim que o TSE divulgar os primeiros números.';
   b.hidden = !msg; b.textContent = msg;
 }
 
@@ -943,7 +921,7 @@ function updateLive() {
   let s, txt;
   if (!navigator.onLine) { s = 'off'; txt = 'Sem internet'; }
   else if (health.fails >= 2 || (health.okAt && Date.now() - health.okAt > REFRESH_MS * 3)) { s = 'retry'; txt = 'Reconectando…'; }
-  else if (health.okAt) { s = 'ok'; txt = SIM ? 'Simulação' : 'Ao vivo'; }
+  else if (health.okAt) { s = 'ok'; txt = 'Ao vivo'; }
   else { s = 'wait'; txt = 'Conectando…'; }
   el.dataset.state = s; t.textContent = txt;
 }
