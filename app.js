@@ -812,12 +812,15 @@ function renderMapDetail() {
   box.innerHTML = `
     <div class="md-h"><b>${nome}</b><span><strong>${fmtPct(p.tot.pst)}%</strong> das urnas apuradas</span></div>
     <div class="md-bar"><i style="width:${Math.min(100, p.tot.pst)}%"></i></div>
+    ${p.tot.te ? `<div class="md-el"><span>Eleitores aptos <b>${nf.format(p.tot.te)}</b></span><span>Já apurados <b>${nf.format(eleitApur(p.tot))}</b></span><span>Faltam <b>${nf.format(p.tot.te - eleitApur(p.tot))}</b></span></div>` : ''}
     ${p.tot.st ? list.map((c, i) => `<div class="md-row" style="--c:${colorOf(c)}"><i></i><span>${i + 1}º ${esc(c.nm)} <small>${esc(c.sg)}</small></span><small>${nf.format(c.vap)} votos</small><b>${fmtPct(c.pvap)}%</b></div>`).join('')
       : '<div class="md-empty">Apuração ainda não começou neste estado.</div>'}
     ${st.uf !== uf ? `<button class="md-go" data-uf="${uf}">Abrir ${nome} completo →</button>` : ''}`;
 }
-/* ---------- Colégio eleitoral: tamanho do eleitorado de cada estado (dado do TSE) ---------- */
+/* ---------- Colégio eleitoral: eleitores aptos × já apurados em cada estado (dados do TSE) ---------- */
 const nfc = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+// Eleitores das seções já totalizadas: nelas cada eleitor apto ou compareceu ou se absteve
+const eleitApur = t => Math.min(t.te, t.c + t.a);
 let eleitAll = false;
 function renderEleitorado() {
   const k = st.cargo, nac = CARGOS[k].nacional, esperado = 27 + (nac ? 1 : 0);
@@ -826,13 +829,18 @@ function renderEleitorado() {
   if (!rows.length) { box.innerHTML = '<div class="empty">Carregando estados…</div>'; $('#eleitTot').textContent = ''; more.hidden = true; return; }
   rows.sort((a, b) => b.p.tot.te - a.p.tot.te);
   const total = rows.reduce((a, r) => a + r.p.tot.te, 0), max = rows[0].p.tot.te;
-  $('#eleitTot').innerHTML = `<b>${nf.format(total)}</b> eleitores aptos${nac ? ' (com exterior)' : ''}${rows.length < esperado ? ` · ${rows.length} de ${esperado} carregados` : ''}`;
+  const apTot = rows.reduce((a, r) => a + eleitApur(r.p.tot), 0);
+  $('#eleitTot').innerHTML = `<div><b>${nf.format(total)}</b> eleitores aptos${nac ? ' (com exterior)' : ''}</div>
+    <div><b>${nf.format(apTot)}</b> já apurados <span>(${fmtPct(apTot / total * 100)}%)</span> · faltam <b>${nf.format(total - apTot)}</b></div>
+    ${rows.length < esperado ? `<div>${rows.length} de ${esperado} estados carregados</div>` : ''}`;
   box.innerHTML = (eleitAll ? rows : rows.slice(0, 10)).map((r, i) => {
-    const te = r.p.tot.te, nome = r.uf === 'zz' ? 'Exterior' : UFS[r.uf];
-    return `<div class="erow${st.uf === r.uf ? ' sel' : ''}" data-uf="${r.uf}" title="${nome}: ${nf.format(te)} eleitores · ${fmtPct(r.p.tot.pst)}% das urnas apuradas">
+    const t = r.p.tot, te = t.te, ap = eleitApur(t), nome = r.uf === 'zz' ? 'Exterior' : UFS[r.uf];
+    const sub = !ap ? 'aguardando apuração' : ap >= te ? 'todos apurados' : `${fmtPct(ap / te * 100)}% dos eleitores · faltam ${nfc.format(te - ap)}`;
+    return `<div class="erow${st.uf === r.uf ? ' sel' : ''}" data-uf="${r.uf}" title="${nome}: ${nf.format(te)} eleitores aptos (${fmtPct(te / total * 100)}% do total) · ${nf.format(ap)} já apurados · ${fmtPct(t.pst)}% das urnas">
       <span class="er-n">${i + 1}º</span>
-      <div><div class="er-h"><b>${nome}</b><span><strong>${nfc.format(te)}</strong> · ${fmtPct(te / total * 100)}%</span></div>
-      <div class="er-bar"><i style="width:${(te / max * 100).toFixed(1)}%"></i></div></div></div>`;
+      <div><div class="er-h"><b>${nome}</b><span><strong>${nfc.format(ap)}</strong> de ${nfc.format(te)}</span></div>
+      <div class="er-bar"><span style="width:${(te / max * 100).toFixed(1)}%"><i style="width:${(ap / te * 100).toFixed(1)}%"></i></span></div>
+      <div class="er-sub">${sub}</div></div></div>`;
   }).join('');
   more.hidden = rows.length <= 10;
   more.textContent = eleitAll ? 'Mostrar só os 10 maiores' : `Ver todos (${rows.length})`;

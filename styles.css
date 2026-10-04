@@ -297,8 +297,13 @@ h1 { font-family: var(--display); font-size: 21px; margin: 0; letter-spacing: -.
 .legend i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
 
 /* Colégio eleitoral */
-.eleit-tot { color: var(--muted); font-size: 12.5px; margin: -6px 0 10px; }
+.eleit-tot { color: var(--muted); font-size: 12.5px; margin: -6px 0 8px; display: grid; gap: 2px; }
 .eleit-tot b { color: var(--text); font-variant-numeric: tabular-nums; }
+.er-key { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--muted); margin-bottom: 8px; }
+.er-key span { display: inline-flex; align-items: center; gap: 6px; }
+.er-key i { width: 18px; height: 8px; border-radius: 99px; }
+.er-key .k-apt { background: rgba(129, 140, 248, .2); box-shadow: inset 0 0 0 1px rgba(129, 140, 248, .35); }
+.er-key .k-apu { background: linear-gradient(90deg, #38bdf8, #818cf8); }
 .eleit { display: flex; flex-direction: column; gap: 2px; margin: 0 -6px; }
 .erow { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: center; padding: 7px 6px; border-radius: 8px; cursor: pointer; transition: background .2s; }
 .erow:hover { background: var(--surface-2); }
@@ -308,8 +313,12 @@ h1 { font-family: var(--display); font-size: 21px; margin: 0; letter-spacing: -.
 .er-h b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .er-h span { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .er-h strong { color: var(--text); }
-.er-bar { height: 6px; margin-top: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.er-bar { height: 8px; margin-top: 5px; }
+.er-bar > span { display: block; height: 100%; border-radius: 99px; overflow: hidden; transition: width .8s; background: rgba(129, 140, 248, .2); box-shadow: inset 0 0 0 1px rgba(129, 140, 248, .35); }
 .er-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #38bdf8, #818cf8); transition: width .8s; }
+.er-sub { color: var(--muted); font-size: 11.5px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.md-el { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: -4px 0 10px; font-size: 12px; color: var(--muted); }
+.md-el b { color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* Exterior por país */
 .paises { display: flex; flex-direction: column; max-height: 520px; overflow-y: auto; margin: 0 -6px; }
