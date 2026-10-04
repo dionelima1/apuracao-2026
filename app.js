@@ -267,7 +267,7 @@ function buildSelects() {
   $('#selUf').innerHTML = opts.join('');
   $('#selUf').value = st.uf;
 
-  const showMun = MUN && UFS[st.uf];
+  const showMun = MUN?.[st.uf] && UFS[st.uf];
   $('#fldMun').hidden = !showMun;
   if (showMun) {
     $('#selMun').innerHTML = '<option value="">Todo o estado</option>' + MUN[st.uf].map(m => `<option value="${m.cd}">${esc(title(m.nm))}</option>`).join('');
@@ -329,6 +329,8 @@ function bindUI() {
     mapFocus = t.dataset.uf; renderMapDetail(); markFocus();
   });
   $('#map').addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') { mapFocus = ''; renderMapDetail(); markFocus(); } });
+  $('#eleit').addEventListener('click', e => { const r = e.target.closest('.erow'); if (r) setUf(st.uf === r.dataset.uf ? 'br' : r.dataset.uf); });
+  $('#eleitMore').addEventListener('click', () => { eleitAll = !eleitAll; renderEleitorado(); });
   $('#mapDetail').addEventListener('click', e => { const b = e.target.closest('.md-go'); if (b) { mapFocus = ''; setUf(b.dataset.uf); } });
   $('#cands').addEventListener('click', e => { const t = e.target.closest('.pano'); if (t) setUf(t.dataset.uf); });
   $('#paises').addEventListener('click', e => {
@@ -791,6 +793,7 @@ function renderMap() {
     ? (() => { const c = current?.p.cands.find(x => x.sq === single); return c ? `<span style="--c:${colorOf(c)}"><i></i>${esc(c.nm)} — quanto mais forte, maior o percentual</span>` : ''; })()
     : [...leaders.values()].sort((a, b) => b.n - a.n).map(({ c, n, lbl }) => `<span style="--c:${colorOf(c)}"><i></i>${esc(lbl)} · lidera em ${n}</span>`).join('');
   renderMapDetail();
+  renderEleitorado();
 }
 
 function markFocus() { for (const t of $('#map').children) t.classList.toggle('focus', t.dataset.uf === mapFocus); }
@@ -813,6 +816,28 @@ function renderMapDetail() {
       : '<div class="md-empty">Apuração ainda não começou neste estado.</div>'}
     ${st.uf !== uf ? `<button class="md-go" data-uf="${uf}">Abrir ${nome} completo →</button>` : ''}`;
 }
+/* ---------- Colégio eleitoral: tamanho do eleitorado de cada estado (dado do TSE) ---------- */
+const nfc = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
+let eleitAll = false;
+function renderEleitorado() {
+  const k = st.cargo, nac = CARGOS[k].nacional, esperado = 27 + (nac ? 1 : 0);
+  const rows = Object.keys(TILES).filter(uf => uf !== 'zz' || nac).map(uf => ({ uf, p: mapData[k + uf] })).filter(r => r.p?.tot.te);
+  const box = $('#eleit'), more = $('#eleitMore');
+  if (!rows.length) { box.innerHTML = '<div class="empty">Carregando estados…</div>'; $('#eleitTot').textContent = ''; more.hidden = true; return; }
+  rows.sort((a, b) => b.p.tot.te - a.p.tot.te);
+  const total = rows.reduce((a, r) => a + r.p.tot.te, 0), max = rows[0].p.tot.te;
+  $('#eleitTot').innerHTML = `<b>${nf.format(total)}</b> eleitores aptos${nac ? ' (com exterior)' : ''}${rows.length < esperado ? ` · ${rows.length} de ${esperado} carregados` : ''}`;
+  box.innerHTML = (eleitAll ? rows : rows.slice(0, 10)).map((r, i) => {
+    const te = r.p.tot.te, nome = r.uf === 'zz' ? 'Exterior' : UFS[r.uf];
+    return `<div class="erow${st.uf === r.uf ? ' sel' : ''}" data-uf="${r.uf}" title="${nome}: ${nf.format(te)} eleitores · ${fmtPct(r.p.tot.pst)}% das urnas apuradas">
+      <span class="er-n">${i + 1}º</span>
+      <div><div class="er-h"><b>${nome}</b><span><strong>${nfc.format(te)}</strong> · ${fmtPct(te / total * 100)}%</span></div>
+      <div class="er-bar"><i style="width:${(te / max * 100).toFixed(1)}%"></i></div></div></div>`;
+  }).join('');
+  more.hidden = rows.length <= 10;
+  more.textContent = eleitAll ? 'Mostrar só os 10 maiores' : `Ver todos (${rows.length})`;
+}
+
 async function loadMap() {
   const k = st.cargo;
   const ufs = Object.keys(UFS).concat(CARGOS[k].nacional ? ['zz'] : []);
